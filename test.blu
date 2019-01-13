@@ -1,0 +1,10 @@
+sum = func(x, y) {
+    x + y;
+};
+
+diff = func(x, y) {
+    x - y;
+};
+
+print(sum(2, 3));
+print(diff(3, 2));
