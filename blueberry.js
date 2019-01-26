@@ -476,6 +476,8 @@ Environment.prototype = {
 // Evaluate
 
 function evaluate(exp, env, callback) {
+    // Guard the stack!
+    GUARD(evaluate, arguments);
     // Determine the expression type
     switch (exp.type) {
         // For number, string and bool values, return the value of the expression
@@ -495,14 +497,17 @@ function evaluate(exp, env, callback) {
                 throw new Error(`Cannot assign to ${JSON.stringify(exp.left)}`);
             }
             // Evaluate the right side and set the value in the environment
-            evaluate(exp.right, env, function(right) {
+            evaluate(exp.right, env, function cc(right) {
+                GUARD(cc, arguments);
                 callback(env.set(exp.left.value, right));
             });
             return;
         // For a binary operator, evaluate in the context of the expression and apply it to either side
         case "binary":
-            evaluate(exp.left, env, function(left) {
-                evaluate(exp.right, env, function(right) {
+            evaluate(exp.left, env, function cc(left) {
+                GUARD(cc, arguments);
+                evaluate(exp.right, env, function cc(right) {
+                    GUARD(cc, arguments);
                     callback(apply_op(exp.operator, left, right));
                 });
             });
@@ -514,7 +519,8 @@ function evaluate(exp, env, callback) {
         // For a conditional, determine the condition and evaluate the appropriate "then" or "else" expression
         case "if":
             // Determine if the condition is true or false
-            evaluate(exp.cond, env, function(cond) {
+            evaluate(exp.cond, env, function cc(cond) {
+                GUARD(cc, arguments);
                 // If true, evaluate the "then" expression
                 if (cond !== false) evaluate(exp.then, env, callback);
                 // If false and there is an "else" expression, evaluate it
@@ -527,8 +533,10 @@ function evaluate(exp, env, callback) {
         case "prog":
             // Loop through expressions
             (function loop(last, i) {
+                GUARD(loop, arguments);
                 // If there is another expression, evaluate it and continue iterating
-                if (i < exp.prog.length) evaluate(exp.prog[i], env, function(val) {
+                if (i < exp.prog.length) evaluate(exp.prog[i], env, function cc(val) {
+                    GUARD(cc, arguments);
                     loop(val, i + 1);
                 // Otherwise, break
                 }); else {
@@ -539,11 +547,14 @@ function evaluate(exp, env, callback) {
         // For a function call, evaluate the function's body
         case "call":
             // Get the function from the expression
-            evaluate(exp.func, env, function(func) {
+            evaluate(exp.func, env, function cc(func) {
+                GUARD(cc, arguments);
                 // Loop through arguments
                 (function loop(args, i) {
+                    GUARD(loop, arguments);
                     // If there is another argument, evaluate it and continue iterating
-                    if (i < exp.args.length) evaluate(exp.args[i], env, function(arg) {
+                    if (i < exp.args.length) evaluate(exp.args[i], env, function cc(arg) {
+                        GUARD(cc, arguments);
                         args[i + 1] = arg;
                         loop(args, i + 1);
                     // Otherwise call function with found arguments
@@ -604,6 +615,7 @@ function make_func(env, exp) {
         env.def(exp.name, func);
     }
     function func(callback) {
+        GUARD(func, arguments);
         // Get arguments and extend the environment to a new closure
         var names = exp.vars;
         var scope = env.extend();
@@ -615,6 +627,27 @@ function make_func(env, exp) {
         evaluate(exp.body, scope, callback);
     }
     return func;
+}
+
+// Guard the stack with continuations as necessary
+var stackLen;
+function GUARD(f, args) {
+    if (--stackLen < 0) throw new Continuation(f, args);
+}
+function Continuation(f, args) {
+    this.f = f;
+    this.args = args;
+}
+
+// Execute the program with stack guards in place
+function Execute(f, args) {
+    while (true) try {
+        stackLen = 200;
+        return f.apply(null, args);
+    } catch(ex) {
+        if (ex instanceof Continuation) f = ex.f, args = ex.args;
+        else throw ex;
+    }
 }
 
 // Set up filesystem library
@@ -657,6 +690,6 @@ globalEnv.def("print", function(callback, str) {
 });
 
 // Run the program
-evaluate(ast, globalEnv, function(result) {
+Execute(evaluate, [ ast, globalEnv, function(result) {
     // Do something maybe?
-});
+}]);
