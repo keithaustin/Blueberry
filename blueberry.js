@@ -664,20 +664,24 @@ var data = fs.readFileSync(process.argv[2], 'utf8');
 
 // Temporary workaround for multiline files
 // If anyone knows a better way to do this, please let me know
+function fixFile (data) {
+    var charArray = data.split("");
 
-var charArray = data.split("");
+    var newData = charArray.map(function(el) {
+        if (el === "\n") return " ";
+        if (el === "\r") return " ";
+        return el;
+    }).join("");
 
-var newData = charArray.map(function(el) {
-    if (el === "\n") return " ";
-    if (el === "\r") return " ";
-    return el;
-}).join("");
+    return newData;
+}
+
 
 // End workaround
 
 // Parse the program to an AST
     
-var ast = parse(tokenStream(inputStream(newData)));
+var ast = parse(tokenStream(inputStream(fixFile(data))));
 
 // Set up the global environment and define built-in functions
 
@@ -687,6 +691,14 @@ var globalEnv = new Environment();
 globalEnv.def("print", function(callback, str) {
     console.log(str);
     callback(false);
+});
+// require(filename) - Reads another Blueberry file and injects it into the current script
+globalEnv.def("require", function(callback, filename) {
+    data = fs.readFileSync(filename, 'utf8');
+    if (typeof data === "string") {
+        var injectAST = parse(tokenStream(inputStream(fixFile(data))));
+        Execute(evaluate, [ injectAST, globalEnv, callback ]);
+    }
 });
 
 // Run the program

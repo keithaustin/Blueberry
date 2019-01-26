@@ -1,3 +1,5 @@
+require("other.blu");
+
 fib = func(n) {
     if n < 2 {
         n
@@ -7,3 +9,4 @@ fib = func(n) {
 };
 
 print(fib(27));
+print(sum(1, 3));
