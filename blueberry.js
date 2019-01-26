@@ -475,17 +475,19 @@ Environment.prototype = {
 
 // Evaluate
 
-function evaluate(exp, env) {
+function evaluate(exp, env, callback) {
     // Determine the expression type
     switch (exp.type) {
         // For number, string and bool values, return the value of the expression
         case "num":
         case "str":
         case "bool":
-            return exp.value;
+            callback(exp.value);
+            return;
         // For a variable reference, get the value from the environment
         case "var":
-            return env.get(exp.value);
+            callback(env.get(exp.value));
+            return;
         // For an assignment, evaluate the assignment expression, set the value in the environment
         case "assign":
             // If the left side of the assignment is not a variable, die
@@ -493,34 +495,64 @@ function evaluate(exp, env) {
                 throw new Error(`Cannot assign to ${JSON.stringify(exp.left)}`);
             }
             // Evaluate the right side and set the value in the environment
-            return env.set(exp.left.value, evaluate(exp.right, env));
+            evaluate(exp.right, env, function(right) {
+                callback(env.set(exp.left.value, right));
+            });
+            return;
         // For a binary operator, evaluate in the context of the expression and apply it to either side
         case "binary":
-            return apply_op(exp.operator, evaluate(exp.left, env), evaluate(exp.right, env));
+            evaluate(exp.left, env, function(left) {
+                evaluate(exp.right, env, function(right) {
+                    callback(apply_op(exp.operator, left, right));
+                });
+            });
+            return;
         // For a function definition, define that function within the environment
         case "func":
-            return make_func(env, exp);
+            callback(make_func(env, exp));
+            return;
         // For a conditional, determine the condition and evaluate the appropriate "then" or "else" expression
         case "if":
             // Determine if the condition is true or false
-            var cond = evaluate(exp.cond, env);
-            // If true, evaluate the "then" expression
-            if (cond !== false) return evaluate(exp.then, env);
-            // If false and there is an "else" expression, evaluate it
-            return exp.else ? evaluate(exp.else, env) : false;
+            evaluate(exp.cond, env, function(cond) {
+                // If true, evaluate the "then" expression
+                if (cond !== false) evaluate(exp.then, env, callback);
+                // If false and there is an "else" expression, evaluate it
+                else if (exp.else) evaluate(exp.else, env, callback);
+                // Otherwise continue to callback
+                else callback(false);
+            });
+            return;
         // For a {} block, evaluate each expression within the block
         case "prog":
-            var val = false;
-            exp.prog.forEach(function(exp) { val = evaluate(exp, env) });
-            return val;
+            // Loop through expressions
+            (function loop(last, i) {
+                // If there is another expression, evaluate it and continue iterating
+                if (i < exp.prog.length) evaluate(exp.prog[i], env, function(val) {
+                    loop(val, i + 1);
+                // Otherwise, break
+                }); else {
+                    callback(last);
+                }
+            })(false, 0);
+            return;
         // For a function call, evaluate the function's body
         case "call":
-            // get the function from the expression
-            var func = evaluate(exp.func, env);
-            // Apply the function, evaluating and passing its arguments
-            return func.apply(null, exp.args.map(function(arg) {
-                return evaluate(arg, env);
-            }));
+            // Get the function from the expression
+            evaluate(exp.func, env, function(func) {
+                // Loop through arguments
+                (function loop(args, i) {
+                    // If there is another argument, evaluate it and continue iterating
+                    if (i < exp.args.length) evaluate(exp.args[i], env, function(arg) {
+                        args[i + 1] = arg;
+                        loop(args, i + 1);
+                    // Otherwise call function with found arguments
+                    }); else {
+                        func.apply(null, args);
+                    }
+                })([ callback ], 0);
+            }); 
+            return;
         // Handle edge cases by dying
         default:
             throw new Error(`I don't know how to evaluate ${exp.type}`);
@@ -566,21 +598,21 @@ function apply_op(op, a, b) {
 // Create function definition
 
 function make_func(env, exp) {
-    function func() {
+    // If function is named, define it by its name
+    if (exp.name) {
+        env = env.extend();
+        env.def(exp.name, func);
+    }
+    function func(callback) {
         // Get arguments and extend the environment to a new closure
         var names = exp.vars;
         var scope = env.extend();
         // Loop through arguments and define them in the environment
         for (var i = 0; i < names.length; ++i) {
-            scope.def(names[i], i < arguments.length ? arguments[i] : false);
+            scope.def(names[i], i + 1 < arguments.length ? arguments[i + 1] : false);
         }
         // Evaluate the function body and add it to the environment
-        return evaluate(exp.body, scope);
-    }
-    // If the function is named, define it by its name in the environment
-    if (exp.name) {
-        env = env.extend();
-        env.def(exp.name, func);
+        evaluate(exp.body, scope, callback);
     }
     return func;
 }
@@ -619,9 +651,12 @@ var ast = parse(tokenStream(inputStream(newData)));
 var globalEnv = new Environment();
 
 // print(str) - prints a string/number to the console
-globalEnv.def("print", function(str) {
+globalEnv.def("print", function(callback, str) {
     console.log(str);
+    callback(false);
 });
 
 // Run the program
-evaluate(ast, globalEnv);
+evaluate(ast, globalEnv, function(result) {
+    // Do something maybe?
+});
